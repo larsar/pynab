@@ -6,9 +6,6 @@ import requests
 import yaml
 
 
-# TODO: Read secrets from environment
-# TODO: Read budget config files
-
 class Ynab:
     def __init__(self):
         with open(r'config/ynab.yml') as file:
