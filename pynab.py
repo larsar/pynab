@@ -7,6 +7,8 @@ from collections import namedtuple
 import requests
 import yaml
 
+auth_header = None
+
 
 def date_ago(minus_days):
     n = datetime.datetime.now()
@@ -14,49 +16,99 @@ def date_ago(minus_days):
     return n - d
 
 
+class Budget:
+    def __init__(self, name, budget_data, ynab, sbanken):
+        self.budget_data = budget_data
+        self.cached_transactions = None
+        self.bank_transactions = []
+        self.ynab = ynab
+        try:
+            with open(r'config/{}/config.yml'.format(name)) as file:
+                self.config = yaml.full_load(file)
+                # print(config)
+                for bank in self.config['accounts']:
+                    for account in self.config['accounts'][bank]:
+                        account_number = str(account)
+                        account_transactions = sbanken.account_transactions(account_number)
+                        for transaction in account_transactions:
+                            # print(sbanken.pseudo_transaction_id(transaction))
+                            # print(sbanken.transaction_data(account_number, transaction))
+                            self.add_bank_transaction(bank, sbanken.transaction_data(account_number, transaction))
+        except FileNotFoundError:
+            pass
+
+    def accounts(self):
+        r = requests.get('https://api.youneedabudget.com/v1/budgets/{}/accounts'.format(self.budget_data.id),
+                         headers=self.ynab.auth_header())
+        print('Accounts in "{}":'.format(self.budget_data.name))
+        for account in json.loads(r.content)['data']['accounts']:
+            print('\t{}: {}'.format(account['name'], account['id']))
+
+    def transactions(self):
+        if not self.cached_transactions:
+            self.cached_transactions = []
+            params = {'startDate': date_ago(7)}
+            r = requests.get('https://api.youneedabudget.com/v1/budgets/{}/transactions'.format(self.budget_data.id),
+                             headers=self.ynab.auth_header(), params=params)
+            for t in json.loads(r.content)['data']['transactions']:
+                self.cached_transactions.append(namedtuple('YnabTransactionData', t.keys())(*t.values()))
+
+        return self.cached_transactions
+
+    def add_bank_transaction(self, bank, transaction):
+        account_id = self.config['accounts'][bank][int(transaction['account_number'])]
+        transaction.pop('account_number', None)
+        transaction['account_id'] = account_id
+        self.bank_transactions.append(transaction)
+        print(transaction)
+        print(self.transactions())
+
+    def find_transaction(self, import_id):
+        for transaction in self.transactions():
+            if transaction.import_id == import_id:
+                return transaction
+        return None
+
+    def sync_transactions(self):
+        import_transactions = []
+        for bank_transaction in self.bank_transactions:
+            if not self.find_transaction(bank_transaction['import_id']):
+                print("Insert transaction")
+                import_transactions.append(bank_transaction)
+
+        if len(import_transactions) > 0:
+            data = {'transactions': import_transactions}
+            print(data)
+            r = requests.post('https://api.youneedabudget.com/v1/budgets/{}/transactions'.format(self.budget_data.id),
+                              data=data, headers=self.ynab.auth_header())
+            print(r.content)
+
+
 class Ynab:
     def __init__(self):
         with open(r'config/ynab.yml') as file:
-            config = yaml.full_load(file)
-            self.access_token = config['access_token']
+            self.config = yaml.full_load(file)
+            self.access_token = self.config['access_token']
             self.budgets = None
-            self.transactions = {}
 
     def auth_header(self):
         return {'Authorization': 'Bearer {}'.format(self.access_token)}
 
-    def budget(self, name):
+    def budget(self, name, sbanken):
         if not self.budgets:
             self.budgets = {}
             r = requests.get('https://api.youneedabudget.com/v1/budgets', headers=self.auth_header())
             print(r.headers['X-Rate-Limit'])
             for b in json.loads(r.content)['data']['budgets']:
-                self.budgets[b['name']] = namedtuple('Budget', b.keys())(*b.values())
+                budget_name = b['name']
+                budget_data = namedtuple('BudgetData', b.keys())(*b.values())
+                self.budgets[budget_name] = Budget(budget_name, budget_data, self, sbanken)
 
         if name not in self.budgets:
-            print('Budget "{}" must be created in YNAB'.format(budget_name))
+            print('Budget "{}" must be created in YNAB'.format(name))
             return None
         else:
             return self.budgets[name]
-
-    def budget_accounts(self, budget):
-        r = requests.get('https://api.youneedabudget.com/v1/budgets/{}/accounts'.format(budget.id),
-                         headers=self.auth_header())
-        print('Accounts in "{}":'.format(budget.name))
-        for account in json.loads(r.content)['data']['accounts']:
-            print('\t{}: {}'.format(account['name'], account['id']))
-
-    def budget_transactions(self, budget):
-        if budget.id not in self.transactions:
-            trans = []
-            params = {'startDate': date_ago(7)}
-            r = requests.get('https://api.youneedabudget.com/v1/budgets/{}/transactions'.format(budget.id),
-                             headers=self.auth_header(), params=params)
-            for t in json.loads(r.content)['data']['transactions']:
-                trans.append(namedtuple('YnabTransaction', t.keys())(*t.values()))
-            self.transactions[budget.id] = trans
-
-        return self.transactions[budget.id]
 
 
 class Sbanken:
@@ -81,7 +133,7 @@ class Sbanken:
                        'customerId': self.customer_id}
             r = requests.get('https://api.sbanken.no/exec.bank/api/v1/Accounts', headers=headers)
             for a in json.loads(r.content)['items']:
-                self.accounts[a['accountNumber']] = namedtuple('SbankenAccount', a.keys())(*a.values())
+                self.accounts[a['accountNumber']] = namedtuple('SbankenAccountData', a.keys())(*a.values())
 
         if account_number not in self.accounts:
             print('Unknown account "{}"'.format(account_number))
@@ -99,37 +151,39 @@ class Sbanken:
                 self.account(account_number).accountId), headers=headers,
                 params=params)
             for t in json.loads(r.content)['items']:
-                trans.append(namedtuple('SbankenTransaction', t.keys())(*t.values()))
+                trans.append(namedtuple('SbankenTransactionData', t.keys())(*t.values()))
             self.transactions[account_number] = trans
 
         return self.transactions[account_number]
 
     def pseudo_transaction_id(self, transaction):
-        print(transaction)
-        print("foobar")
         pseudo_key_data = '{}{}{}{}'.format(transaction.accountingDate,
                                             transaction.amount,
                                             transaction.transactionTypeCode,
                                             transaction.text)
-
         return hashlib.md5(pseudo_key_data.encode('utf-8')).hexdigest()
 
+    def transaction_data(self, account_number, transaction):
+        return {'account_number': account_number,
+                'date': transaction.accountingDate,
+                'amount': int(transaction.amount * 1000),
+                'memo': transaction.text,
+                'cleared': (not transaction.isReservation),
+                'import_id': self.pseudo_transaction_id(transaction)
+                }
 
-ynab = Ynab()
-sbanken = Sbanken()
 
-for root, dirs, files in os.walk('config'):
-    for budget_name in dirs:
-        budget = ynab.budget(budget_name)
-        ynab.budget_accounts(budget)
-        # print(ynab.budget_transactions(budget))
-        with open(r'config/{}/config.yml'.format(budget_name)) as file:
-            config = yaml.full_load(file)
-            print(config)
-            for bank in config['accounts']:
-                print(bank)
-                for account in config['accounts'][bank]:
-                    account_number = str(account)
-                    account_transactions = sbanken.account_transactions(account_number)
-                    for transaction in account_transactions:
-                        print(sbanken.pseudo_transaction_id(transaction))
+def main():
+    ynab = Ynab()
+    sbanken = Sbanken()
+
+    for root, dirs, files in os.walk('config'):
+        for budget_name in dirs:
+            budget = ynab.budget(budget_name, sbanken)
+            # print(budget.accounts())
+            # print(ynab.budget_transactions(budget))
+            budget.sync_transactions()
+
+
+if __name__ == "__main__":
+    main()
