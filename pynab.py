@@ -18,25 +18,18 @@ def date_ago(minus_days):
 
 
 class Budget:
-    def __init__(self, name, budget_data, ynab, sbanken):
+    def __init__(self, budget_data, ynab, sbanken, config):
         self.budget_data = budget_data
         self.cached_transactions = None
         self.bank_transactions = []
         self.ynab = ynab
-        try:
-            with open(r'config/{}/config.yml'.format(name)) as file:
-                self.config = yaml.full_load(file)
-                # print(config)
-                for bank in self.config['accounts']:
-                    for account in self.config['accounts'][bank]:
-                        account_number = str(account)
-                        account_transactions = sbanken.account_transactions(account_number)
-                        for transaction in account_transactions:
-                            # print(sbanken.pseudo_transaction_id(transaction))
-                            # print(sbanken.transaction_data(account_number, transaction))
-                            self.add_bank_transaction(bank, sbanken.transaction_data(account_number, transaction))
-        except FileNotFoundError:
-            pass
+        for bank in config[budget_data['name']]['accounts']:
+            for account_config in config['accounts'][bank]:
+                account_number = account_config['account_number']
+                if bank == 'sbanken':
+                    account_transactions = sbanken.account_transactions(account_number)
+                    for transaction in account_transactions:
+                        self.add_bank_transaction(bank, sbanken.transaction_data(account_number, transaction))
 
     def accounts(self):
         r = requests.get('https://api.youneedabudget.com/v1/budgets/{}/accounts'.format(self.budget_data.id),
@@ -88,11 +81,10 @@ class Budget:
 
 
 class Ynab:
-    def __init__(self):
-        with open(r'config/ynab.yml') as file:
-            self.config = yaml.full_load(file)
-            self.access_token = self.config['access_token']
-            self.budgets = None
+    def __init__(self, access_token, budget_config):
+        self.access_token = access_token
+        self.budget_config = budget_config
+        self.budgets = None
 
     def auth_header(self):
         return {'Authorization': 'Bearer {}'.format(self.access_token)}
@@ -105,7 +97,7 @@ class Ynab:
             for b in json.loads(r.content)['data']['budgets']:
                 budget_name = b['name']
                 budget_data = namedtuple('BudgetData', b.keys())(*b.values())
-                self.budgets[budget_name] = Budget(budget_name, budget_data, self, sbanken)
+                self.budgets[budget_name] = Budget(budget_data, self.budget_config[name], self, sbanken)
 
         if name not in self.budgets:
             print('Budget "{}" must be created in YNAB'.format(name))
@@ -115,19 +107,17 @@ class Ynab:
 
 
 class Sbanken:
-    def __init__(self):
-        with open(r'config/sbanken.yml') as file:
-            config = yaml.full_load(file)
-            self.client_id = config['client_id']
-            self.client_secret = config['client_secret']
-            self.customer_id = config['customer_id']
-            self.accounts = None
-            self.transactions = {}
+    def __init__(self, config):
+        self.client_id = config['client_id']
+        self.client_secret = config['client_secret']
+        self.customer_id = config['customer_id']
+        self.accounts = None
+        self.transactions = {}
 
-            r = requests.post('https://auth.sbanken.no/identityserver/connect/token',
-                              {'grant_type': 'client_credentials'},
-                              auth=(self.client_id, self.client_secret))
-            self.access_token = json.loads(r.content)['access_token']
+        r = requests.post('https://auth.sbanken.no/identityserver/connect/token',
+                          {'grant_type': 'client_credentials'},
+                          auth=(self.client_id, self.client_secret))
+        self.access_token = json.loads(r.content)['access_token']
 
     def account(self, account_number):
         if not self.accounts:
@@ -182,15 +172,18 @@ class Sbanken:
 
 
 def main():
-    ynab = Ynab()
-    sbanken = Sbanken()
+    config = None
+    with open(r'config.yml') as file:
+        config = yaml.full_load(file)
 
-    for root, dirs, files in os.walk('config'):
-        for budget_name in dirs:
-            budget = ynab.budget(budget_name, sbanken)
-            # print(budget.accounts())
-            # print(ynab.budget_transactions(budget))
-            budget.sync_transactions()
+    ynab = Ynab(config['ynab']['access_token'], config['budgets'])
+    sbanken = Sbanken(config['sbanken'])
+
+    for budget_name in config['budgets']:
+        budget = ynab.budget(budget_name, sbanken)
+        # print(budget.accounts())
+        # print(ynab.budget_transactions(budget))
+        budget.sync_transactions()
 
 
 if __name__ == "__main__":

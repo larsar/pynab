@@ -1,0 +1,13 @@
+ynab:
+  access_token: 'Insert your YNAB access token here'
+sbanken:
+  client_id: 'Insert your Sbanken client ID here'
+  client_secret: 'Insert your Sbanken client secret here'
+  customer_id: 'Your national identity number'
+
+budgets:
+  - name: 'Name of a budget in YNAB'
+    accounts:
+      sbanken:
+        - account_number: 'Sbanken account number'
+        - ynab_account_id: 'Corresponding account ID from YNAB'
