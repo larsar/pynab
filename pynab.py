@@ -4,6 +4,7 @@ import json
 import os
 from collections import namedtuple
 
+
 import requests
 import yaml
 
@@ -59,6 +60,8 @@ class Budget:
         account_id = self.config['accounts'][bank][int(transaction['account_number'])]
         transaction.pop('account_number', None)
         transaction['account_id'] = account_id
+        transaction['date'] = datetime.datetime.fromisoformat(transaction['date']).strftime("%Y-%m-%d")
+
         self.bank_transactions.append(transaction)
         print(transaction)
         print(self.transactions())
@@ -78,9 +81,9 @@ class Budget:
 
         if len(import_transactions) > 0:
             data = {'transactions': import_transactions}
-            print(data)
+
             r = requests.post('https://api.youneedabudget.com/v1/budgets/{}/transactions'.format(self.budget_data.id),
-                              data=data, headers=self.ynab.auth_header())
+                              json=data, headers=self.ynab.auth_header())
             print(r.content)
 
 
@@ -164,11 +167,16 @@ class Sbanken:
         return hashlib.md5(pseudo_key_data.encode('utf-8')).hexdigest()
 
     def transaction_data(self, account_number, transaction):
+        if transaction.isReservation:
+            cleared = 'uncleared'
+        else:
+            cleared = 'cleared'
+
         return {'account_number': account_number,
                 'date': transaction.accountingDate,
                 'amount': int(transaction.amount * 1000),
                 'memo': transaction.text,
-                'cleared': (not transaction.isReservation),
+                'cleared': cleared,
                 'import_id': self.pseudo_transaction_id(transaction)
                 }
 
