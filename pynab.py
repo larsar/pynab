@@ -1,9 +1,8 @@
 import datetime
 import hashlib
 import json
-import os
+import re
 from collections import namedtuple
-
 
 import requests
 import yaml
@@ -21,15 +20,34 @@ class Budget:
     def __init__(self, budget_data, ynab, sbanken, config):
         self.budget_data = budget_data
         self.cached_transactions = None
+        self.cached_categories = None
         self.bank_transactions = []
         self.ynab = ynab
-        for bank in config[budget_data['name']]['accounts']:
-            for account_config in config['accounts'][bank]:
-                account_number = account_config['account_number']
-                if bank == 'sbanken':
-                    account_transactions = sbanken.account_transactions(account_number)
-                    for transaction in account_transactions:
-                        self.add_bank_transaction(bank, sbanken.transaction_data(account_number, transaction))
+        self.account_map = {}
+        if budget_data.name in config:
+            self.accounts()
+            self.budget_config = config[budget_data.name]
+            for bank in self.budget_config['accounts']:
+                for account_config in self.budget_config['accounts'][bank]:
+                    account_number = account_config['account_number']
+                    self.account_map[account_number] = account_config['ynab_account_id']
+                    if bank == 'sbanken':
+                        account_transactions = sbanken.account_transactions(account_number)
+                        for transaction in account_transactions:
+                            self.add_bank_transaction(bank, sbanken.transaction_data(account_number, transaction))
+
+    def category_id(self, name):
+        if not self.cached_categories:
+            self.cached_categories = {}
+            r = requests.get('https://api.youneedabudget.com/v1/budgets/{}/categories'.format(self.budget_data.id),
+                             headers=self.ynab.auth_header())
+            tree = json.loads(r.content)['data']
+            for group in tree['category_groups']:
+                for category in group['categories']:
+                    if not category['hidden']:
+                        self.cached_categories[category['name']] = category['id']
+
+        return self.cached_categories.get(name, None)
 
     def accounts(self):
         r = requests.get('https://api.youneedabudget.com/v1/budgets/{}/accounts'.format(self.budget_data.id),
@@ -50,14 +68,13 @@ class Budget:
         return self.cached_transactions
 
     def add_bank_transaction(self, bank, transaction):
-        account_id = self.config['accounts'][bank][int(transaction['account_number'])]
+        account_id = self.account_map[transaction['account_number']]
         transaction.pop('account_number', None)
         transaction['account_id'] = account_id
         transaction['date'] = datetime.datetime.fromisoformat(transaction['date']).strftime("%Y-%m-%d")
+        transaction['import_id'] = Sbanken.pseudo_transaction_id(transaction)
 
         self.bank_transactions.append(transaction)
-        print(transaction)
-        print(self.transactions())
 
     def find_transaction(self, import_id):
         for transaction in self.transactions():
@@ -65,16 +82,77 @@ class Budget:
                 return transaction
         return None
 
+    def transaction_with_payee(self, transaction):
+        for payee in self.budget_config['payees']:
+            match_list = [payee]
+            if self.budget_config['payees'][payee]:
+                match_list.extend(self.budget_config['payees'][payee])
+            for match in match_list:
+                p = re.compile(match, re.IGNORECASE)
+                m = p.search(transaction['memo'])
+                if m:
+                    transaction['payee_name'] = payee
+                    return self.transaction_with_category(transaction)
+
+        return transaction
+
+    def transaction_with_category(self, transaction):
+        if 'payee_name' not in transaction:
+            return transaction
+
+        for category in self.budget_config['categories']:
+            for payee in self.budget_config['categories'][category]:
+                if transaction['payee_name'] == payee:
+                    transaction['category_id'] = self.category_id(category)
+                    return transaction
+        return transaction
+
+
     def sync_transactions(self):
         import_transactions = []
+        update_transactions = []
         for bank_transaction in self.bank_transactions:
             if not self.find_transaction(bank_transaction['import_id']):
-                print("Insert transaction")
-                import_transactions.append(bank_transaction)
+                t = self.transaction_with_payee(bank_transaction)
+                t = self.transaction_with_category(t)
+                import_transactions.append(t)
+
+        for ynab_transaction in self.transactions():
+            patch_transaction = ynab_transaction._asdict()
+            patched = False
+            if ynab_transaction.cleared == 'uncleared':
+                # Check for orphaned transactions (sbanken changes that result in new key)
+                match = False
+                for bank_transaction in self.bank_transactions:
+                    if ynab_transaction.import_id == Sbanken.pseudo_transaction_id(bank_transaction):
+                        match = True
+                        break
+                if not match:
+                    patch_transaction['flag_color'] = 'red'
+                    patched = True
+
+            if not ynab_transaction.payee_name:
+                patch_transaction = self.transaction_with_payee(patch_transaction)
+                if  patch_transaction['payee_name']:
+                    patched = True
+            if not ynab_transaction.category_id:
+                patch_transaction = self.transaction_with_category(patch_transaction)
+                if patch_transaction['category_id']:
+                    patched = True
+
+            if patched:
+                update_transactions.append(patch_transaction)
+
+        if len(update_transactions) > 0:
+            print('Patching {} transactions'.format(len(update_transactions)))
+            data = {'transactions': update_transactions}
+            r = requests.patch('https://api.youneedabudget.com/v1/budgets/{}/transactions'.format(self.budget_data.id),
+                              json=data, headers=self.ynab.auth_header())
+            print(r.content)
 
         if len(import_transactions) > 0:
+            print('Inserting {} transactions'.format(len(import_transactions)))
             data = {'transactions': import_transactions}
-
             r = requests.post('https://api.youneedabudget.com/v1/budgets/{}/transactions'.format(self.budget_data.id),
                               json=data, headers=self.ynab.auth_header())
             print(r.content)
@@ -97,7 +175,7 @@ class Ynab:
             for b in json.loads(r.content)['data']['budgets']:
                 budget_name = b['name']
                 budget_data = namedtuple('BudgetData', b.keys())(*b.values())
-                self.budgets[budget_name] = Budget(budget_data, self.budget_config[name], self, sbanken)
+                self.budgets[budget_name] = Budget(budget_data, self, sbanken, self.budget_config)
 
         if name not in self.budgets:
             print('Budget "{}" must be created in YNAB'.format(name))
@@ -139,7 +217,7 @@ class Sbanken:
             trans = []
             headers = {'Authorization': 'Bearer {}'.format(self.access_token),
                        'customerId': self.customer_id}
-            params = {'startDate': date_ago(7).strftime("%Y.%m.%d"), 'length': 1}
+            params = {'startDate': date_ago(7).strftime("%Y.%m.%d"), 'length': 20}
             r = requests.get('https://api.sbanken.no/exec.bank/api/v1/Transactions/{}'.format(
                 self.account(account_number).accountId), headers=headers,
                 params=params)
@@ -149,11 +227,10 @@ class Sbanken:
 
         return self.transactions[account_number]
 
-    def pseudo_transaction_id(self, transaction):
-        pseudo_key_data = '{}{}{}{}'.format(transaction.accountingDate,
-                                            transaction.amount,
-                                            transaction.transactionTypeCode,
-                                            transaction.text)
+    def pseudo_transaction_id(transaction):
+        pseudo_key_data = '{}{}{}'.format(transaction['date'],
+                                            transaction['amount'],
+                                            transaction['memo'])
         return hashlib.md5(pseudo_key_data.encode('utf-8')).hexdigest()
 
     def transaction_data(self, account_number, transaction):
@@ -167,7 +244,7 @@ class Sbanken:
                 'amount': int(transaction.amount * 1000),
                 'memo': transaction.text,
                 'cleared': cleared,
-                'import_id': self.pseudo_transaction_id(transaction)
+                'approved': True
                 }
 
 
@@ -181,9 +258,8 @@ def main():
 
     for budget_name in config['budgets']:
         budget = ynab.budget(budget_name, sbanken)
-        # print(budget.accounts())
-        # print(ynab.budget_transactions(budget))
         budget.sync_transactions()
+
 
 
 if __name__ == "__main__":
