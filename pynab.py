@@ -27,7 +27,7 @@ class Budget:
         self.account_map = {}
         if budget_data.name in config:
             self.accounts()
-            self.budget_config = config[budget_data.name]
+            self.budget_config = config[budget_data.name] or {}
             self.account_map = self.accounts()
             for account_number in self.account_map:
                 account_transactions = sbanken.account_transactions(account_number)
@@ -95,7 +95,7 @@ class Budget:
 
     def transaction_with_payee(self, transaction):
         if 'payees' in self.budget_config:
-            for payee in self.budget_config['payees']:
+            for payee in self.budget_config['payees'] or {}:
                 match_list = [payee]
                 if self.budget_config['payees'][payee]:
                     match_list.extend(self.budget_config['payees'][payee])
@@ -112,7 +112,7 @@ class Budget:
         if 'payee_name' not in transaction:
             return transaction
         if self.budget_config['categories']:
-            for category in self.budget_config['categories']:
+            for category in self.budget_config['categories'] or {}:
                 for payee in self.budget_config['categories'][category]:
                     if transaction['payee_name'] == payee:
                         transaction['category_id'] = self.category_id(category)
