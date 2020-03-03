@@ -21,6 +21,7 @@ class Budget:
         self.budget_data = budget_data
         self.cached_transactions = None
         self.cached_categories = None
+        self.cached_accounts = None
         self.bank_transactions = []
         self.ynab = ynab
         self.account_map = {}
@@ -47,13 +48,24 @@ class Budget:
         return self.cached_categories.get(name, None)
 
     def accounts(self):
-        r = requests.get('https://api.youneedabudget.com/v1/budgets/{}/accounts'.format(self.budget_data.id),
-                         headers=self.ynab.auth_header())
-        acc = {}
-        for account in json.loads(r.content)['data']['accounts']:
-            if account['note']:
-                acc[account['note']] = account['id']
-        return acc
+        if not self.cached_accounts:
+            self.cached_accounts = {}
+            r = requests.get('https://api.youneedabudget.com/v1/budgets/{}/accounts'.format(self.budget_data.id),
+                             headers=self.ynab.auth_header())
+
+            print('')
+            print('YNAB accounts for {}:'.format(self.budget_data.name))
+            print('*****************')
+            for account in json.loads(r.content)['data']['accounts']:
+                if account['note']:
+                    self.cached_accounts[account['note']] = account['id']
+                    print(
+                        "{} ({}): balance={} cleared={} diff={}".format(account['name'],
+                                                                        account['note'],
+                                                                        int(account['balance'] / 1000),
+                                                                        int(account['cleared_balance']) / 1000,
+                                                                        int(account['uncleared_balance']) / 1000))
+        return self.cached_accounts
 
     def transactions(self):
         if not self.cached_transactions:
@@ -107,7 +119,6 @@ class Budget:
                         return transaction
         return transaction
 
-
     def sync_transactions(self):
         import_transactions = []
         update_transactions = []
@@ -120,8 +131,9 @@ class Budget:
         for ynab_transaction in self.transactions():
             patch_transaction = ynab_transaction._asdict()
             patched = False
-            if ynab_transaction.cleared == 'uncleared':
-                # Check for orphaned transactions (sbanken changes that result in new key)
+
+            # Check for orphaned transactions (sbanken changes that result in new key)
+            if ynab_transaction.import_id and ynab_transaction.flag_color != 'red':
                 match = False
                 for bank_transaction in self.bank_transactions:
                     if ynab_transaction.import_id == Sbanken.pseudo_transaction_id(bank_transaction):
@@ -129,11 +141,12 @@ class Budget:
                         break
                 if not match:
                     patch_transaction['flag_color'] = 'red'
+                    patch_transaction['cleared'] = 'uncleared'
                     patched = True
 
             if not ynab_transaction.payee_name:
                 patch_transaction = self.transaction_with_payee(patch_transaction)
-                if  patch_transaction['payee_name']:
+                if patch_transaction['payee_name']:
                     patched = True
             if not ynab_transaction.category_id:
                 patch_transaction = self.transaction_with_category(patch_transaction)
@@ -147,15 +160,13 @@ class Budget:
             print('Patching {} transactions'.format(len(update_transactions)))
             data = {'transactions': update_transactions}
             r = requests.patch('https://api.youneedabudget.com/v1/budgets/{}/transactions'.format(self.budget_data.id),
-                              json=data, headers=self.ynab.auth_header())
-            #print(r.content)
+                               json=data, headers=self.ynab.auth_header())
 
         if len(import_transactions) > 0:
             print('Inserting {} transactions'.format(len(import_transactions)))
             data = {'transactions': import_transactions}
             r = requests.post('https://api.youneedabudget.com/v1/budgets/{}/transactions'.format(self.budget_data.id),
                               json=data, headers=self.ynab.auth_header())
-            #print(r.content)
 
 
 class Ynab:
@@ -203,8 +214,17 @@ class Sbanken:
             headers = {'Authorization': 'Bearer {}'.format(self.access_token),
                        'customerId': self.customer_id}
             r = requests.get('https://api.sbanken.no/exec.bank/api/v1/Accounts', headers=headers)
+            print('')
+            print('Sbanken accounts:')
+            print('*****************')
             for a in json.loads(r.content)['items']:
                 self.accounts[a['accountNumber']] = namedtuple('SbankenAccountData', a.keys())(*a.values())
+                print(
+                    "{} ({}): balance={} cleared={} diff={}".format(a['name'],
+                                                                    a['accountNumber'],
+                                                                    a['available'],
+                                                                    a['balance'],
+                                                                    a['available']-a['balance']))
 
         if account_number not in self.accounts:
             print('Unknown account "{}"'.format(account_number))
@@ -217,7 +237,7 @@ class Sbanken:
             trans = []
             headers = {'Authorization': 'Bearer {}'.format(self.access_token),
                        'customerId': self.customer_id}
-            #params = {'startDate': date_ago(30).strftime("%Y.%m.%d"), 'length': 1000}
+            # params = {'startDate': date_ago(30).strftime("%Y.%m.%d"), 'length': 1000}
             params = {'startDate': "2020.03.01", 'length': 1000}
             r = requests.get('https://api.sbanken.no/exec.bank/api/v1/Transactions/{}'.format(
                 self.account(account_number).accountId), headers=headers,
@@ -230,8 +250,8 @@ class Sbanken:
 
     def pseudo_transaction_id(transaction):
         pseudo_key_data = '{}{}{}'.format(transaction['date'],
-                                            transaction['amount'],
-                                            transaction['memo'])
+                                          transaction['amount'],
+                                          transaction['memo'])
         return hashlib.md5(pseudo_key_data.encode('utf-8')).hexdigest()
 
     def transaction_data(self, account_number, transaction):
@@ -259,7 +279,6 @@ def main():
     for budget_name in config['budgets']:
         budget = ynab.budget(budget_name, sbanken)
         budget.sync_transactions()
-
 
 
 if __name__ == "__main__":
