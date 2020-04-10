@@ -133,7 +133,7 @@ class Budget:
             patched = False
 
             # Check for orphaned transactions (sbanken changes that result in new key)
-            if ynab_transaction.import_id and ynab_transaction.flag_color != 'red':
+            if ynab_transaction.cleared != 'reconciled' and ynab_transaction.import_id and ynab_transaction.flag_color != 'red':
                 match = False
                 for bank_transaction in self.bank_transactions:
                     if ynab_transaction.import_id == Sbanken.pseudo_transaction_id(bank_transaction):
