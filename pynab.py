@@ -72,7 +72,7 @@ class Budget:
     def transactions(self):
         if not self.cached_transactions:
             self.cached_transactions = []
-            params = {'startDate': date_ago(os.getenv('YNAB_HISTORY_DAYS', default='30'))}
+            params = {'startDate': date_ago(int(os.getenv('YNAB_HISTORY_DAYS', default='30')))}
             r = requests.get('https://api.youneedabudget.com/v1/budgets/{}/transactions'.format(self.budget_data.id),
                              headers=self.ynab.auth_header(), params=params)
             for t in json.loads(r.content)['data']['transactions']:
