@@ -1,0 +1,16 @@
+version: '3'
+
+volumes:
+  postgres_data:
+    driver: local
+
+services:
+  app:
+    build: .
+    command: ./config.yml
+    restart: on-failure
+    volumes:
+      - ./:/usr/src/app
+
+
+

@@ -2,7 +2,7 @@ import datetime
 import hashlib
 import json
 import os
-import urllib.parse
+import urllib.parse, sys
 import re
 from collections import namedtuple
 
@@ -257,8 +257,8 @@ class Sbanken:
                 }
 
 
-def main():
-    with open(r'config.yml') as file:
+def main(config_file):
+    with open(config_file, 'r') as file:
         config = yaml.full_load(file)
 
     ynab = Ynab(os.getenv('YNAB_ACCESS_TOKEN'), config['budgets'])
@@ -270,4 +270,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    print(sys.argv)
+    main(sys.argv[1])
