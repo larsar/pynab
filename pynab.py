@@ -1,6 +1,7 @@
 import datetime
 import hashlib
 import json
+import os
 import urllib.parse
 import re
 from collections import namedtuple
@@ -187,10 +188,9 @@ class Ynab:
 
 
 class Sbanken:
-    def __init__(self, config):
-        self.client_id = config['client_id']
-        self.client_secret = config['client_secret']
-        self.customer_id = config['customer_id']
+    def __init__(self, client_id, client_secret):
+        self.client_id = client_id
+        self.client_secret = client_secret
         self.accounts = None
         self.transactions = {}
 
@@ -202,8 +202,7 @@ class Sbanken:
     def account(self, account_number):
         if not self.accounts:
             self.accounts = {}
-            headers = {'Authorization': 'Bearer {}'.format(self.access_token),
-                       'customerId': self.customer_id}
+            headers = {'Authorization': 'Bearer {}'.format(self.access_token)}
             r = requests.get('https://publicapi.sbanken.no/apibeta/api/v2/Accounts', headers=headers)
             print('')
             print('Sbanken accounts:')
@@ -226,10 +225,9 @@ class Sbanken:
     def account_transactions(self, account_number):
         if account_number not in self.transactions:
             trans = []
-            headers = {'Authorization': 'Bearer {}'.format(self.access_token),
-                       'customerId': self.customer_id}
+            headers = {'Authorization': 'Bearer {}'.format(self.access_token)}
             # params = {'startDate': date_ago(30).strftime("%Y.%m.%d"), 'length': 1000}
-            params = {'startDate': "2021.07.28", 'length': 1000}
+            params = {'startDate': "2021.07.26", 'length': 1000}
 
             r = requests.get('https://publicapi.sbanken.no/apibeta/api/v2/Transactions/archive/{}'.format(
                 self.account(account_number).accountId), headers=headers,
@@ -263,8 +261,8 @@ def main():
     with open(r'config.yml') as file:
         config = yaml.full_load(file)
 
-    ynab = Ynab(config['ynab']['access_token'], config['budgets'])
-    sbanken = Sbanken(config['sbanken'])
+    ynab = Ynab(os.getenv('YNAB_ACCESS_TOKEN'), config['budgets'])
+    sbanken = Sbanken(os.getenv('SBANKEN_CLIENT_ID'), os.getenv('SBANKEN_CLIENT_SECRET'))
 
     for budget_name in config['budgets']:
         budget = ynab.budget(budget_name, sbanken)
