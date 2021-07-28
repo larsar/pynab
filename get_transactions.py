@@ -73,7 +73,7 @@ def main():
         account_id = account['accountId']
         account_name = account['name']
         ft = open('data/{}-trans-{}.txt'.format(ts, account_name), 'w+')
-        transactions = get_transactions(CUSTOMERID, token, account_id, date_ago(7))
+        transactions = get_transactions(CUSTOMERID, token, account_id, date_ago(3))
         for transaction in transactions:
             ft.write('{}\n'.format(transaction))
         ft.close()

@@ -1,6 +1,7 @@
 import datetime
 import hashlib
 import json
+import urllib.parse
 import re
 from collections import namedtuple
 
@@ -83,7 +84,7 @@ class Budget:
         transaction.pop('account_number', None)
         transaction['account_id'] = account_id
         transaction['date'] = datetime.datetime.fromisoformat(transaction['date']).strftime("%Y-%m-%d")
-        transaction['import_id'] = Sbanken.pseudo_transaction_id(transaction)
+        transaction['import_id'] = transaction['transaction_id']
 
         self.bank_transactions.append(transaction)
 
@@ -100,6 +101,8 @@ class Budget:
                 if self.budget_config['payees'][payee]:
                     match_list.extend(self.budget_config['payees'][payee])
                 for match in match_list:
+                    if transaction['memo'] is None:
+                        continue
                     p = re.compile(match, re.IGNORECASE)
                     m = p.search(transaction['memo'])
                     if m:
@@ -131,18 +134,6 @@ class Budget:
         for ynab_transaction in self.transactions():
             patch_transaction = ynab_transaction._asdict()
             patched = False
-
-            # Check for orphaned transactions (sbanken changes that result in new key)
-            if ynab_transaction.cleared != 'reconciled' and ynab_transaction.import_id and ynab_transaction.flag_color != 'red':
-                match = False
-                for bank_transaction in self.bank_transactions:
-                    if ynab_transaction.import_id == Sbanken.pseudo_transaction_id(bank_transaction):
-                        match = True
-                        break
-                if not match:
-                    patch_transaction['flag_color'] = 'red'
-                    patch_transaction['cleared'] = 'uncleared'
-                    patched = True
 
             if not ynab_transaction.payee_name:
                 patch_transaction = self.transaction_with_payee(patch_transaction)
@@ -205,7 +196,7 @@ class Sbanken:
 
         r = requests.post('https://auth.sbanken.no/identityserver/connect/token',
                           {'grant_type': 'client_credentials'},
-                          auth=(self.client_id, self.client_secret))
+                          auth=(urllib.parse.quote(self.client_id), urllib.parse.quote(self.client_secret)))
         self.access_token = json.loads(r.content)['access_token']
 
     def account(self, account_number):
@@ -213,7 +204,7 @@ class Sbanken:
             self.accounts = {}
             headers = {'Authorization': 'Bearer {}'.format(self.access_token),
                        'customerId': self.customer_id}
-            r = requests.get('https://api.sbanken.no/exec.bank/api/v1/Accounts', headers=headers)
+            r = requests.get('https://publicapi.sbanken.no/apibeta/api/v2/Accounts', headers=headers)
             print('')
             print('Sbanken accounts:')
             print('*****************')
@@ -238,8 +229,9 @@ class Sbanken:
             headers = {'Authorization': 'Bearer {}'.format(self.access_token),
                        'customerId': self.customer_id}
             # params = {'startDate': date_ago(30).strftime("%Y.%m.%d"), 'length': 1000}
-            params = {'startDate': "2020.03.01", 'length': 1000}
-            r = requests.get('https://api.sbanken.no/exec.bank/api/v1/Transactions/{}'.format(
+            params = {'startDate': "2021.07.28", 'length': 1000}
+
+            r = requests.get('https://publicapi.sbanken.no/apibeta/api/v2/Transactions/archive/{}'.format(
                 self.account(account_number).accountId), headers=headers,
                 params=params)
             for t in json.loads(r.content)['items']:
@@ -255,16 +247,14 @@ class Sbanken:
         return hashlib.md5(pseudo_key_data.encode('utf-8')).hexdigest()
 
     def transaction_data(self, account_number, transaction):
-        if transaction.isReservation:
-            cleared = 'uncleared'
-        else:
-            cleared = 'cleared'
 
-        return {'account_number': account_number,
+        return {
+                'transaction_id': transaction.transactionId,
+                'account_number': account_number,
                 'date': transaction.accountingDate,
                 'amount': int(transaction.amount * 1000),
                 'memo': transaction.text,
-                'cleared': cleared,
+                'cleared': 'cleared',
                 'approved': True
                 }
 
