@@ -72,7 +72,7 @@ class Budget:
     def transactions(self):
         if not self.cached_transactions:
             self.cached_transactions = []
-            params = {'startDate': date_ago(30)}
+            params = {'startDate': date_ago(os.getenv('YNAB_HISTORY_DAYS', default='30'))}
             r = requests.get('https://api.youneedabudget.com/v1/budgets/{}/transactions'.format(self.budget_data.id),
                              headers=self.ynab.auth_header(), params=params)
             for t in json.loads(r.content)['data']['transactions']:
@@ -226,7 +226,7 @@ class Sbanken:
         if account_number not in self.transactions:
             trans = []
             headers = {'Authorization': 'Bearer {}'.format(self.access_token)}
-            # params = {'startDate': date_ago(30).strftime("%Y.%m.%d"), 'length': 1000}
+            # params = {'startDate': date_ago(int(os.getenv('SBANKEN_HISTORY_DAYS', default='30'))).strftime("%Y.%m.%d"), 'length': 1000}
             params = {'startDate': "2021.07.26", 'length': 1000}
 
             r = requests.get('https://publicapi.sbanken.no/apibeta/api/v2/Transactions/archive/{}'.format(
