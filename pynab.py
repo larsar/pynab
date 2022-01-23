@@ -2,8 +2,10 @@ import datetime
 import hashlib
 import json
 import os
-import urllib.parse, sys
 import re
+import sys
+import time
+import urllib.parse
 from collections import namedtuple
 
 import requests
@@ -214,7 +216,7 @@ class Sbanken:
                                                                     a['accountNumber'],
                                                                     a['available'],
                                                                     a['balance'],
-                                                                    a['available']-a['balance']))
+                                                                    a['available'] - a['balance']))
 
         if account_number not in self.accounts:
             print('Unknown account "{}"'.format(account_number))
@@ -247,14 +249,14 @@ class Sbanken:
     def transaction_data(self, account_number, transaction):
 
         return {
-                'transaction_id': transaction.transactionId,
-                'account_number': account_number,
-                'date': transaction.accountingDate,
-                'amount': int(transaction.amount * 1000),
-                'memo': transaction.text,
-                'cleared': 'cleared',
-                'approved': True
-                }
+            'transaction_id': transaction.transactionId,
+            'account_number': account_number,
+            'date': transaction.accountingDate,
+            'amount': int(transaction.amount * 1000),
+            'memo': transaction.text,
+            'cleared': 'cleared',
+            'approved': True
+        }
 
 
 def main(config_file):
@@ -270,5 +272,11 @@ def main(config_file):
 
 
 if __name__ == "__main__":
-    print(sys.argv)
-    main(sys.argv[1])
+
+    while (True):
+        main(sys.argv[1])
+        if len(sys.argv) == 3:
+            print("Sleeping for {} seconds...".format(sys.argv[2]))
+            time.sleep(int(sys.argv[2]))
+        else:
+            exit(0)
