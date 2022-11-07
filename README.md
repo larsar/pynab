@@ -34,8 +34,7 @@ The script runs and then sleeps for a number of seconds. The sleep delay is spec
 
 ## Without Docker
 1. Install python virtual environment: `make venv`
-2. Activate environment: ``
-3. Install dependencies: `make install`
-4. Run: `python3 pynab.py ./config.yml 86400`
+2. Install dependencies: `make install`
+3. Run: `python3 pynab.py ./config.yml 86400`
 
 
