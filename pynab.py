@@ -228,7 +228,8 @@ class Sbanken:
         if account_number not in self.transactions:
             trans = []
             headers = {'Authorization': 'Bearer {}'.format(self.access_token)}
-            params = {'startDate': date_ago(int(os.getenv('SBANKEN_HISTORY_DAYS', default='30'))).strftime("%Y.%m.%d"), 'length': 1000}
+            params = {'startDate': date_ago(int(os.getenv('SBANKEN_HISTORY_DAYS', default='30'))).strftime("%Y.%m.%d"),
+                      'length': 1000}
 
             r = requests.get('https://publicapi.sbanken.no/apibeta/api/v2/Transactions/archive/{}'.format(
                 self.account(account_number).accountId), headers=headers,

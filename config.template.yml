@@ -1,6 +1,4 @@
 budgets:
-  - name: 'Name of a budget in YNAB'
-    accounts:
-      sbanken:
-        - account_number: 'Sbanken account number'
-        - ynab_account_id: 'Corresponding account ID from YNAB'
+  '<BUDGET NAME>':
+    payees:
+    categories:

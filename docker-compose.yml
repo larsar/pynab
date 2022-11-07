@@ -2,7 +2,9 @@ version: '3'
 services:
   app:
     build: .
-    command: ./config.yml
+    env_file:
+      - .env
+    command: ./config.yml 86400
     restart: on-failure
     volumes:
       - ./:/usr/src/app
