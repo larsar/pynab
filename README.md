@@ -50,6 +50,8 @@ can then be automatically mapped to a category, based on the "categories" sectio
 The script will only try to set payee and/or category for the YNAB transaction if it is not already set. In other words
 you can override the configuration by updating the transaction manually in YNAB.
 
+See config.example.yml for full example.
+
 ### Payees
 Specify the payee names, as you would like to use in YNAB. The script will search for that name in the transaction's
 text field. Optionally you can specify a list of search strings for the payee if the text does not contain the name
