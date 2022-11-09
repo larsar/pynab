@@ -240,12 +240,6 @@ class Sbanken:
 
         return self.transactions[account_number]
 
-    def pseudo_transaction_id(transaction):
-        pseudo_key_data = '{}{}{}'.format(transaction['date'],
-                                          transaction['amount'],
-                                          transaction['memo'])
-        return hashlib.md5(pseudo_key_data.encode('utf-8')).hexdigest()
-
     def transaction_data(self, account_number, transaction):
 
         return {
