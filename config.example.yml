@@ -1,0 +1,26 @@
+budgets:
+  'Test':
+    payees:
+      'Apple':
+      'Amazon':
+        - 'AMZN Digital'
+      'Elkjøp':
+        - 'ELKJOEP'
+      'Komplett':
+        - 'KOMPLETT.NO'
+      'Rema 1000':
+        - 'Rema'
+      'Meny':
+      'Kiwi':
+      'Netflix':
+      'Spotify':
+    categories:
+      'Groceries':
+        - 'Rema 1000'
+        - 'Meny'
+        - 'Kiwi'
+      'Streaming':
+        - 'Spotify'
+        - 'Netflix'
+        - 'Apple'
+
